@@ -1,0 +1,351 @@
+<?php
+
+class LdapUser extends AppModel {
+
+    var $name = 'LdapUser';
+    var $useTable = false;
+    var $primaryKey = 'uid';
+    var $host = 'ldap.toto.fr';
+    var $port = 389;
+    var $dn = 'dc=domain,dc=local';
+    var $baseDn = 'ou=People,dc=domain,dc=local';
+    var $user = 'cn=admin,dc=domain,dc=local';
+    var $pass = 'password';
+    var $ds;
+
+    public $validate = array(
+        'firstname' => array(
+            'notempty' => array(
+                'rule' => array('notempty'),
+                'message' => 'Un prenom est requis',
+            ),
+            'alphaNumeric' => array(
+                'rule' => array('alphaNumeric'),
+                'message' => 'Seuls les caracteres alphanumeriques sont autorises',
+            )
+        ),
+        'lastname' => array(
+            'notempty' => array(
+                'rule' => array('notempty'),
+                'message' => 'Un nom est requis',
+            ),
+            'alphaNumeric' => array(
+                'rule' => array('alphaNumeric'),
+                'message' => 'Seuls les caracteres alphanumeriques sont autorises',
+            )
+        ),
+        'password' => array(
+            'required' => array(
+                'rule' => array('notEmpty'),
+                'message' => 'Un mot de passe est requis'
+            )
+        ),
+        'password2' => array(
+            'required' => array(
+                'rule' => array('notEmpty'),
+                'message' => 'Un mot de passe est requis'
+            )
+        ),
+    );
+
+    function __construct() {
+        parent::__construct();
+        $this->ds = ldap_connect($this->host, $this->port);
+        ldap_set_option($this->ds, LDAP_OPT_PROTOCOL_VERSION, 3);
+        ldap_bind($this->ds, $this->user, $this->pass);
+    }
+
+    function __destruct() {
+        ldap_close($this->ds);
+    }
+
+    function findAll($attribute = 'uid', $value = '*') {
+//$r = ldap_search($this->ds, $baseDn, $attribute . '=' . $value);
+        $r = ldap_search($this->ds, $this->baseDn, $attribute . '=' . $value);
+        if ($r) {
+//if the result contains entries with surnames,
+//sort by surname:
+            ldap_sort($this->ds, $r, "sn");
+
+            $result = ldap_get_entries($this->ds, $r);
+            return $this->convert_from_ldap($result);
+        }
+        return null;
+    }
+
+// would be nice to read fields. left the parameter in as placeholder and to be compatible with other read()'s
+    function read($fields = null, $uid = null) {
+        $r = ldap_search($this->ds, $this->baseDn, 'uid=' . $uid);
+        if ($r) {
+            $l = ldap_get_entries($this->ds, $r);
+            $convert = $this->convert_from_ldap($l);
+            return $convert[0];
+        }
+    }
+    
+    function save($data = NULL, $validate = true, $fieldList = array()) {
+        $login = $this->get_uid_free(strtolower($data['LdapUser']['firstname'][0]) . strtolower($data['LdapUser']['lastname']));
+        $uid = "uid=" . $login . "," . $this->baseDn;
+        $gid = "10000";
+        $lastname = strtoupper($data['LdapUser']['lastname']);
+        if(isset($data['LdapUser']['uidnumber'])) {
+            $uidnumber = $data['LdapUser']['uidnumber'];
+        }
+        else {
+            $uidnumber = $this->findLargestUidNumber()+1;
+        }
+        //$uidnumber = $this->findLargestUidNumber()+1;
+        $sambasidsuffix = 2*$uidnumber+1000;
+        $data_ldap = array(
+            "sn" => $lastname,
+            "cn" => $data['LdapUser']['firstname']." ".$lastname,
+            "uidnumber" => $uidnumber,
+            "givenName" => $data['LdapUser']['firstname'],
+            "displayName" => $data['LdapUser']['firstname']." ".$lastname,
+            "gidNumber" => $gid,
+            "homeDirectory" => "/home/users/$login",
+            "loginShell" => "/bin/false",
+            //"shadowLastChange" => 12081,
+            //"shadowWarning" => 7,
+            //"shadowInactive" => 2,
+            "sambaSID" => $this->get_samba_sid()."-".$sambasidsuffix,
+            "sambaDomainName" => "BHC",
+        );
+        if (strcmp($data['LdapUser']['password'], '0000000000') != 0) {
+            $password = $data['LdapUser']['password'];
+            $data_ldap['userPassword'] = "{SHA}" . base64_encode(pack("H*", sha1($password)));
+            $data_ldap['sambaNTPassword'] = $this->make_md4_password($password);
+            $data_ldap['sambaPwdLastSet'] = time();
+        }
+        $data_ldap['objectClass'] = array('posixAccount', 'top', 'shadowAccount', 'person', 'organizationalPerson', 'inetOrgPerson', 'sambaSamAccount');
+        return ldap_add($this->ds, $uid, $data_ldap);
+    }
+
+    function del($uid) {
+        $dn = "uid=$uid," . $this->baseDn;
+        return ldap_delete($this->ds, $dn);
+    }
+
+    function auth($uid, $password) {
+        $result = $this->findAll('uid', $uid);
+
+        if ($result[0]) {
+            if (ldap_bind($this->ds, $result[0]['dn'], $password)) {
+                return true;
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+
+     function get_uid_free($uid) {
+        $uidtest = $uid;
+        $i = 1;
+        while ($this->person_exists($uidtest)) {
+            $uidtest = $uid . $i;
+            $i++;
+        }
+        return strtolower($uidtest);
+    }
+
+    function get_samba_sid() {
+        $filter = "(&(objectClass=sambaDomain)(sambaDomainName=*))";
+        $findWhat = array("sambaSID");
+        $sr = ldap_search($this->ds, $this->dn, $filter, $findWhat);
+        $records = ldap_get_entries($this->ds, $sr);
+        return $records[0]['sambasid'][0];
+    }
+
+    function findLargestUidNumber() {
+        $r = ldap_search($this->ds, $this->baseDn, 'uidnumber=*');
+        if ($r) {
+// there must be a better way to get the largest uidnumber, but I can't find a way to reverse sort.
+            ldap_sort($this->ds, $r, "uidnumber");
+
+            $result = ldap_get_entries($this->ds, $r);
+            $count = $result['count'];
+            $biguid = $result[$count - 1]['uidnumber'][0];
+            return $biguid;
+        }
+        return null;
+    }
+
+    private function convert_from_ldap($data) {
+        foreach ($data as $key => $row):
+            if ($key === 'count')
+                continue;
+
+            foreach ($row as $key1 => $param):
+                if (!is_numeric($key1))
+                    continue;
+                if ($row[$param]['count'] === 1)
+                    $final[$key]['LdapUser'][$param] = $row[$param][0];
+                else {
+                    foreach ($row[$param] as $key2 => $item):
+                        if ($key2 === 'count')
+                            continue;
+                        $final[$key]['LdapUser'][$param][] = $item;
+                    endforeach;
+                }
+            endforeach;
+        endforeach;
+        return $final;
+    }
+
+    public function get_groups() {
+        //$this->bind();
+        $findWhat = array("cn");
+        $findFilter = "(&(objectClass=posixGroup)(cn=*))";
+        $sr = ldap_search($this->ds, $this->baseDn, $findFilter, $findWhat);
+        $records = ldap_get_entries($this->ds, $sr);
+//$this->disconnect();
+        return $records;
+    }
+
+    public function get_all_users_except_group($groupname) {
+        $arr = array();
+        //$this->bind();
+        $findWhat = array("memberUid", "gidNumber");
+        $findFilter = "(&(objectClass=posixGroup)(cn=$groupname))";
+        $sr = ldap_search($this->ds, $this->baseDn, $findFilter, $findWhat);
+        $records = ldap_get_entries($this->ds, $sr);
+        /* echo "<pre>";
+          print_r($records);
+          echo "</pre>"; */
+        $records_all = $this->get_users();
+        /* echo "<pre>";
+          print_r($records_all);
+          echo "</pre>"; */
+        for ($i = 0; $i < $records_all["count"]; $i++) {
+            $found = false;
+            if ($records[0]["gidnumber"][0] != $records_all[$i]["gidnumber"][0]) {
+                for ($j = 0; $j < $records[0]["memberuid"]["count"]; $j++) {
+                    if ($records_all[$i]["uid"][0] == $records[0]["memberuid"][$j]) {
+                        $found = true;
+                    }
+                }
+                if (!$found) {
+                    $arr[] = $records_all[$i]["uid"][0];
+                }
+            }
+        }
+//$this->disconnect();
+        return $arr;
+    }
+
+    public function get_users_from_group($groupname) {
+        $arr = array();
+        //$this->bind();
+        $findWhat = array("memberUid");
+        $findFilter = "(&(objectClass=posixGroup)(cn=$groupname))";
+        $sr = ldap_search($this->ds, $this->baseDn, $findFilter, $findWhat);
+        $records = ldap_get_entries($this->ds, $sr);
+        for ($i = 0; $i < $records[0]["memberuid"]["count"]; $i++) {
+            $arr[] = $records[0]["memberuid"][$i];
+        }
+        return $arr;
+    }
+
+    public function search_filter($filter) {
+        //$this->bind();
+//$findWhat = array ("uid", "uidNumber", "cn","mail");
+        $findWhat = array("uidNumber");
+        $sr = ldap_search($this->ds, $this->baseDn, $filter, $findWhat);
+        $records = ldap_get_entries($this->ds, $sr);
+//$this->disconnect();
+        return $records;
+    }
+
+    public function person_exists($uid) {
+        //$this->bind();
+        $filter = "(uid=*)";
+        $findWhat = array("uid");
+        $sr = ldap_search($this->ds, $this->baseDn, $filter, $findWhat);
+        $records = ldap_get_entries($this->ds, $sr);
+        for ($i = 0; $i < sizeof($records) - 1; $i++) {
+            if (strcmp($records[$i]["uid"][0], $uid) == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public function del_person($uid) {
+        $racineuser = "ou=people," . $this->baseDn;
+
+        /* Suppression du user dans les groupes */
+        $info = array();
+        $list = $this->get_groups();
+        $size = sizeof($list) - 1;
+        for ($i = 0; $i < $size; $i++) {
+            $list2 = $this->get_users_from_group($list[$i]);
+            $size2 = sizeof($list2);
+            $found = false;
+            for ($j = 0; $j < $size2; $j++) {
+                if (strcmp($size2[$j], $uid) != 0) {
+                    $info[] = "$list2[$j]";
+                } else {
+                    $found = true;
+                }
+            }
+            if ($found) {
+                $this->modify_group($list[$i], $info);
+            }
+        }
+
+        /* Suppression du user */
+        if ($this->bind()) {
+            if (ldap_delete($this->ds, "uid=$uid,$racineuser")) {
+                echo "OK";
+//$this->disconnect();
+                return true;
+            } else {
+                echo "NOK";
+//$this->disconnect();
+                return false;
+            }
+        }
+    }
+
+    public function modify_group($cn, $list_users) {
+        $racineuser = "ou=group," . $this->baseDn;
+        $info = array();
+        for ($i = 0; $i < sizeof($list_users); $i++) {
+            $info["memberuid"] [$i] = "$list_users[$i]";
+        }
+        if ($this->bind()) {
+            if (ldap_modify($this->ds, "cn=$cn,$racineuser", $info)) {
+                echo "OK";
+//$this->disconnect();
+                return true;
+            } else {
+                echo "NOK";
+//$this->disconnect();
+                return false;
+            }
+        }
+    }
+
+    public function make_md4_password($password) {
+        $hash = strtoupper(bin2hex(mhash(MHASH_MD4, iconv("UTF-8", "UTF-16LE", $password))));
+        return $hash;
+    }
+
+    /*public function generate_password() {
+        $chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz023456789";
+        srand((double) microtime() * 1000000);
+        $i = 0;
+        $pass = '';
+        while ($i <= 7) {
+            $num = rand() % 60;
+            $tmp = substr($chars, $num, 1);
+            $pass = $pass . $tmp;
+            $i++;
+        }
+        return $pass;
+    }*/
+
+}
+?> 

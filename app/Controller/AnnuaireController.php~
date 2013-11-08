@@ -1,0 +1,29 @@
+<?php
+class AnnuaireController extends AppController {
+	public function index() {
+		$d = array();
+		$d['entries'] = $this->Annuaire->find('all');
+		$this->set('data', $d);
+	}
+	
+	public function orderfirstname() {
+		$this->view = "index";
+		$d = array();	
+		$d['entries'] = $this->Annuaire->find('all', array(
+			'order' => array('Annuaire.firstname')			
+		));
+	   //$this->set('entries', $this->Annuaire->find('all'));
+		$this->set('data', $d);
+	}	
+		
+	public function orderlastname() {
+		$this->view = "index";
+		$d = array();	
+		$d['entries'] = $this->Annuaire->find('all', array(
+			'order' => array('Annuaire.firstname')			
+		));
+	   //$this->set('entries', $this->Annuaire->find('all'));
+		$this->set('data', $d);
+	}			
+}
+?>

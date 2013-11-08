@@ -1,0 +1,25 @@
+<br>
+<?= $this->Html->css("signin.css"); ?>
+<div class="col-md-6">
+<?= $this->Form->create('User', array('class' => 'signin')); ?>
+	<div class="form-group">
+		<label for="inputLogin1" class="col-lg-4 control-label">Identifiant </label>
+    	<div class="col-lg-6">
+			<?= $this->Form->input('username', array('label' => false, 'class' => 'form-control', 'placeholder' => 'Identifiant')); ?>
+		</div>
+	</div>
+	<div class="form-group">
+		<label for="inputPassword1" class="col-lg-4 control-label">Password </label>
+    	<div class="col-lg-6">
+			<?= $this->Form->input('password', array('label' => false, 'class' => 'form-control', 'placeholder' => 'Password')); ?>
+		</div>
+	</div>
+	<?php
+		$options = array(
+    			'label' => 'Se connecter',
+    			'class' => 'btn btn-default',
+    		);
+	echo $this->Form->end($options); 
+	?>
+</div>
+

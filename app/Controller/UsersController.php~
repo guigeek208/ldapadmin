@@ -1,0 +1,56 @@
+<?php
+
+class UsersController extends AppController {
+
+    public $uses = array('User');
+
+    public function login() {
+        //$this->layout = "login";   
+        if (!empty($this->request->data)) {
+            if ($this->Auth->login()) {
+                return $this->redirect('/Annuaire/index');
+            }
+        }
+    }
+
+    public function logout() {
+        $this->Auth->logout();
+        return $this->redirect('/');
+    }
+
+    public function index() {
+        $d = array();
+        $d['entries'] = $this->User->find('all');
+        $this->set('data', $d);
+        if (!empty($this->request->data)) {
+            foreach ($this->request->data['User'] as $key => $value) {
+                $this->User->delete($key);
+            }
+            $this->redirect(array('action' => 'index'));
+        }
+    }
+
+    public function add_user() {
+        //debug($this->request->data);
+        if (!empty($this->request->data)) {
+            debug($this->data);
+
+            /* if (!$this->User->save(array(
+              'username' => $this->request->data['User']['username'],
+              'password' => $this->request->data['User']['password'],
+              'role' => $this->request->data['User']['role'],
+              ))) { */
+            if (!$this->User->save($this->request->data)) {
+                $this->Session->setFlash(__('Erreur'));
+            }
+            debug($this->validationErrors);
+        }
+    }
+
+    public function settings() {
+        
+    }
+
+}
+
+?>
