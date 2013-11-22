@@ -6,7 +6,12 @@ class LdapUsersController extends AppController {
     var $uses = array('LdapUser');
 
     function index() {
-        $users = $this->LdapUser->findAll('uid', '*');
+        try {
+            $users = $this->LdapUser->findAllUsers('uid', '*');
+        }
+        catch (Exception $e) {
+            debug($e);
+        }
         $this->set('ldap_users', $users);
     }
 

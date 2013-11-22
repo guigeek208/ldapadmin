@@ -15,17 +15,17 @@ if ($this->Session->read('Auth.User')) {
             ), array('escape' => false)
     );
 
-    /*if ($this->params['controller'] == "users" && $this->params['controller'] == "index") {
+    if ($this->params['controller'] == "Ldapgroups" && $this->params['controller'] == "index") {
         echo '<li class="active">';
     } else {
         echo '<li>';
     }
     echo $this->Html->link(
-            '<span class="glyphicon glyphicon-user"></span> Utilisateurs', array(
-        'controller' => 'users',
+            '<span class="glyphicon glyphicon-user"></span> Groupes LDAP', array(
+        'controller' => 'ldapgroups',
         'action' => 'index'
             ), array('escape' => false)
-    );*/
+    );
 
     echo '</ul>' .
     '<ul class="nav navbar-nav navbar-right">';
